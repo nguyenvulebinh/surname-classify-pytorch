@@ -20,7 +20,7 @@ class Vocabulary(object):
 
         self._token_to_idx = token_to_idx
 
-        self._idx_to_token = {token:idx for idx, token in self._token_to_idx.items()}
+        self._idx_to_token = {token: idx for idx, token in self._token_to_idx.items()}
         self._add_unk = add_unk
         self._unk_token = unk_token
         self.unk_index = -1
@@ -100,14 +100,16 @@ class SurnameVectorizer(object):
     The Vectorizer which coordinates the Vocabulary and puts them to use
     """
 
-    def __init__(self, surname_vocab, nationality_vocab):
+    def __init__(self, surname_vocab, nationality_vocab, max_surname_length):
         """
 
         :param surname_vocab: (Vocabulary) maps surname to integers
         :param nationality_vocab: (Vocabulary) maps class labels to integers
+        :param max_surname_length: (int) max length of text surname to create matrix
         """
         self.surname_vocab = surname_vocab
         self.nationality_vocab = nationality_vocab
+        self._max_surname_length = max_surname_length
 
     def vectorize(self, text):
         """
@@ -115,10 +117,10 @@ class SurnameVectorizer(object):
         :param text: surname
         :return: one_hot ndarray the collapsed one-hot encoding
         """
-        one_hot = np.zeros(len(self.surname_vocab), dtype=np.float32)
-        for char in text:
-            one_hot[self.surname_vocab.lookup_token(char)] = 1
-        return one_hot
+        matrix_vector = np.zeros((len(self.surname_vocab), self._max_surname_length), dtype=np.float32)
+        for char_index, char in enumerate(text):
+            matrix_vector[self.surname_vocab.lookup_token(char)][char_index] = 1
+        return matrix_vector
 
     @classmethod
     def from_dataframe(cls, dataframe):
@@ -129,13 +131,14 @@ class SurnameVectorizer(object):
         """
         surname_vocab = Vocabulary(add_unk=True)
         nationality_vocab = Vocabulary(add_unk=False)
-
+        max_surname_length = 0
         for _, row in dataframe.iterrows():
+            max_surname_length = max(len(row.surname), max_surname_length)
             for char in row.surname:
                 surname_vocab.add_token(char)
             nationality_vocab.add_token(row.nationality)
 
-        return cls(surname_vocab, nationality_vocab)
+        return cls(surname_vocab, nationality_vocab, max_surname_length)
 
     @classmethod
     def from_serializable(cls, contents):
@@ -146,8 +149,8 @@ class SurnameVectorizer(object):
         """
         surname_vocab = Vocabulary.from_serializable(contents['surname_vocab'])
         nationality_vocab = Vocabulary.from_serializable(contents['nationality_vocab'])
-
-        return cls(surname_vocab, nationality_vocab)
+        max_surname_length = contents['max_surname_length']
+        return cls(surname_vocab, nationality_vocab, max_surname_length)
 
     def to_serializable(self):
         """
@@ -157,7 +160,8 @@ class SurnameVectorizer(object):
 
         return {
             'surname_vocab': self.surname_vocab.to_serializable(),
-            'nationality_vocab': self.nationality_vocab.to_serializable()
+            'nationality_vocab': self.nationality_vocab.to_serializable(),
+            'max_surname_length': self._max_surname_length
         }
 
 
@@ -223,10 +227,10 @@ class SurnameDataset(Dataset):
         :return: a dict of the data point's features (x_data) and label (y_target)
         """
         row = self._target_df.iloc[index]
-        surname_vector = self._vectorizer.vectorize(row.surname)
+        surname_matrix = self._vectorizer.vectorize(row.surname)
         nationality_index = self._vectorizer.nationality_vocab.lookup_token(row.nationality)
         return {
-            'x_data': surname_vector,
+            'x_data': surname_matrix,
             'y_target': nationality_index
         }
 

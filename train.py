@@ -14,7 +14,7 @@ args = Namespace(
     surname_csv='./data/surnames_with_splits.csv',
     save_dir='./model_storage/surname/',
     vectorizer_file='vectorizer.json',
-    hidden_size=300,
+    num_channels=256,
     # No model hyperparameters
     # Traning hyperparameters
     batch_size=64,
@@ -57,10 +57,11 @@ dataset = SurnameDataset.load_dataset_and_make_vectorizer(args.surname_csv)
 vectorizer = dataset.get_vectorizer()
 
 # model
-classifier = SurnameClassifier(input_size=len(vectorizer.surname_vocab),
-                               hidden_size=args.hidden_size,
-                               output_size=len(vectorizer.nationality_vocab))
+classifier = SurnameClassifier(initial_num_channels=len(vectorizer.surname_vocab),
+                               num_channels=args.num_channels,
+                               num_classes=len(vectorizer.nationality_vocab))
 classifier = classifier.to(args.device)
+print(classifier)
 
 # loss and optimizer
 loss_func = nn.CrossEntropyLoss(weight=dataset.class_weights)
@@ -91,7 +92,7 @@ for epoch_index in range(args.num_epochs):
         # step 3: compute the loss
         loss = loss_func(y_pred, batch_dict['y_target'])
         loss_batch = loss.item()
-        running_loss += (loss_batch - running_loss) / (batch_index + 1)
+        running_loss += ((loss_batch - running_loss) / (batch_index + 1))
 
         # step 4: use loss to produce gradients
         loss.backward()
@@ -104,6 +105,7 @@ for epoch_index in range(args.num_epochs):
         acc_batch = compute_accuracy(y_pred, batch_dict['y_target'])
         running_acc += (acc_batch - running_acc) / (batch_index + 1)
 
+    print("Epoch: {}, train_loss: {:.3f}, train_acc: {:.2f}%".format(epoch_index, running_loss, running_acc))
     train_state['train_loss'].append(running_loss)
     train_state['train_acc'].append(running_acc)
 
@@ -118,7 +120,7 @@ for epoch_index in range(args.num_epochs):
 
     for batch_index, batch_dict in enumerate(batch_generator):
         # step 1: compute the output
-        y_pred = classifier(x_in=batch_dict['x_data'].float(), train_mode=False)
+        y_pred = classifier(x_in=batch_dict['x_data'].float())
 
         # step 2: compute the loss
         loss = loss_func(y_pred, batch_dict['y_target'])
@@ -128,6 +130,7 @@ for epoch_index in range(args.num_epochs):
         # step 3: compute the accuracy
         acc_batch = compute_accuracy(y_pred, batch_dict['y_target'])
         running_acc += (acc_batch - running_acc) / (batch_index + 1)
+
     print("Epoch: {}, val_loss: {:.3f}, val_acc: {:.2f}%".format(epoch_index, running_loss, running_acc))
     train_state['val_loss'].append(running_loss)
     train_state['val_acc'].append(running_acc)
@@ -150,7 +153,7 @@ classifier.eval()
 
 for batch_index, batch_dict in enumerate(batch_generator):
     # compute output
-    y_pred = classifier(x_in=batch_dict['x_data'].float(), train_mode=False)
+    y_pred = classifier(x_in=batch_dict['x_data'].float())
 
     # compute loss
     loss = loss_func(y_pred, batch_dict['y_target'])

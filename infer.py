@@ -12,7 +12,7 @@ args = Namespace(
     surname_csv='./data/surnames_with_splits.csv',
     save_dir='./model_storage/surname/',
     vectorizer_file='vectorizer.json',
-    hidden_size=300,
+    num_channels=256,
     device=device,
     # No model hyperparameters
     # Traning hyperparameters
@@ -45,7 +45,7 @@ def predict_surname(text, classifier, vectorizer):
 
     surname = preprocess_text(text)
     vectorized_surname = torch.tensor(vectorizer.vectorize(surname))
-    result = classifier(vectorized_surname.view(1, -1).to(args.device))
+    result = classifier(vectorized_surname.unsqueeze(dim=0).to(args.device))
     probability_value = torch.softmax(result, dim=0).squeeze()
 
     class_index = torch.argmax(probability_value).item()
@@ -60,9 +60,9 @@ if __name__ == "__main__":
     vectorizer = SurnameVectorizer.from_serializable(contents)
 
     # model
-    classifier = SurnameClassifier(input_size=len(vectorizer.surname_vocab),
-                                   hidden_size=args.hidden_size,
-                                   output_size=len(vectorizer.nationality_vocab))
+    classifier = SurnameClassifier(initial_num_channels=len(vectorizer.surname_vocab),
+                                   num_channels=args.num_channels,
+                                   num_classes=len(vectorizer.nationality_vocab))
     classifier = classifier.to(args.device)
 
     # load model
