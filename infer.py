@@ -12,16 +12,21 @@ args = Namespace(
     surname_csv='./data/surnames_with_splits.csv',
     save_dir='./model_storage/surname/',
     vectorizer_file='vectorizer.json',
-    num_channels=256,
-    device=device,
-    # No model hyperparameters
+    # Model hyper parameter
+    char_embedding_size=100,
+    rnn_hidden_size=64,
     # Traning hyperparameters
+    num_epochs=100,
+    learning_rate=1e-3,
     batch_size=64,
-    early_stoping_criteria=5,
-    learning_rate=0.001,
-    num_epochs=20,
     seed=1337,
-    # Runtime options omitted for space
+    early_stopping_criteria=5,
+    # Runtime hyper parameter
+    cuda=True,
+    catch_keyboard_interrupt=True,
+    reload_from_files=False,
+    expand_filepaths_to_save_dir=True,
+    device=device
 )
 
 
@@ -44,8 +49,8 @@ def predict_surname(text, classifier, vectorizer):
     """
 
     surname = preprocess_text(text)
-    vectorized_surname = torch.tensor(vectorizer.vectorize(surname))
-    result = classifier(vectorized_surname.unsqueeze(dim=0).to(args.device))
+    vectorized_surname, len_surname = vectorizer.vectorize(surname)
+    result = classifier(torch.tensor(vectorized_surname).unsqueeze(dim=0).to(args.device), torch.tensor([len_surname]))
     probability_value = torch.softmax(result, dim=0).squeeze()
 
     class_index = torch.argmax(probability_value).item()
@@ -60,9 +65,11 @@ if __name__ == "__main__":
     vectorizer = SurnameVectorizer.from_serializable(contents)
 
     # model
-    classifier = SurnameClassifier(initial_num_channels=len(vectorizer.surname_vocab),
-                                   num_channels=args.num_channels,
-                                   num_classes=len(vectorizer.nationality_vocab))
+    classifier = SurnameClassifier(embedding_size=args.char_embedding_size,
+                                   vocab_size=len(vectorizer.surname_vocab),
+                                   num_classes=len(vectorizer.nationality_vocab),
+                                   rnn_hidden_size=args.rnn_hidden_size,
+                                   padding_idx=vectorizer.surname_vocab.mask_index)
     classifier = classifier.to(args.device)
 
     # load model

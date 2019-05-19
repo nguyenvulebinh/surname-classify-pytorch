@@ -2,6 +2,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import pandas as pd
+import json
 
 
 class Vocabulary(object):
@@ -9,11 +10,9 @@ class Vocabulary(object):
     Class to process text and extract Vocabulary for mapping
     """
 
-    def __init__(self, token_to_idx=None, add_unk=True, unk_token="<UNK>"):
+    def __init__(self, token_to_idx=None):
         """
         :param token_to_idx:  a pre-existing map of tokens to indices
-        :param add_unk: a flag that indicates whether to add the UNK token
-        :param unk_token: the UNK token to add into the Vocabulary
         """
         if token_to_idx is None:
             token_to_idx = {}
@@ -21,11 +20,6 @@ class Vocabulary(object):
         self._token_to_idx = token_to_idx
 
         self._idx_to_token = {token: idx for idx, token in self._token_to_idx.items()}
-        self._add_unk = add_unk
-        self._unk_token = unk_token
-        self.unk_index = -1
-        if add_unk:
-            self.unk_index = self.add_token(unk_token)
 
     def to_serializable(self):
         """
@@ -33,9 +27,7 @@ class Vocabulary(object):
         :return:
         """
         return {
-            'token_to_idx': self._token_to_idx,
-            'add_unk': self._add_unk,
-            'unk_token': self._unk_token
+            'token_to_idx': self._token_to_idx
         }
 
     @classmethod
@@ -72,10 +64,7 @@ class Vocabulary(object):
         :return: the index corresponding to the token
         Notes: 'unk_index' needs to be >= 0 (having been added into the Vocabulary)
         """
-        if self.unk_index >= 0:
-            return self._token_to_idx.get(token, self.unk_index)
-        else:
-            return self._token_to_idx[token]
+        return self._token_to_idx[token]
 
     def lookup_index(self, index):
         """
@@ -95,32 +84,70 @@ class Vocabulary(object):
         return len(self._token_to_idx)
 
 
+class SequenceVocabulary(Vocabulary):
+    def __init__(self, token_to_idx=None, unk_token="<UNK>",
+                 mask_token="<MASK>", begin_seq_token="<BEGIN>", end_seq_token="<END>"):
+        super(SequenceVocabulary, self).__init__(token_to_idx)
+
+        self._mask_token = mask_token
+        self._unk_token = unk_token
+        self._begin_seq_token = begin_seq_token
+        self._end_seq_token = end_seq_token
+
+        self.mask_index = self.add_token(self._mask_token)
+        self.unk_index = self.add_token(self._unk_token)
+        self.begin_seq_index = self.add_token(self._begin_seq_token)
+        self.end_seq_index = self.add_token(self._end_seq_token)
+
+    def to_serializable(self):
+        contents = super(SequenceVocabulary, self).to_serializable()
+        contents.update({
+            'unk_token': self._unk_token,
+            'mask_token': self._mask_token,
+            "begin_seq_token": self._begin_seq_token,
+            'end_seq_token': self._end_seq_token
+        })
+        return contents
+
+    def lookup_token(self, token):
+        if self.unk_index >= 0:
+            return self._token_to_idx.get(token, self.unk_index)
+        else:
+            return self._token_to_idx.get(token)
+
+
 class SurnameVectorizer(object):
     """
     The Vectorizer which coordinates the Vocabulary and puts them to use
     """
 
-    def __init__(self, surname_vocab, nationality_vocab, max_surname_length):
+    def __init__(self, surname_vocab, nationality_vocab):
         """
 
         :param surname_vocab: (Vocabulary) maps surname to integers
         :param nationality_vocab: (Vocabulary) maps class labels to integers
-        :param max_surname_length: (int) max length of text surname to create matrix
         """
         self.surname_vocab = surname_vocab
         self.nationality_vocab = nationality_vocab
-        self._max_surname_length = max_surname_length
 
-    def vectorize(self, text):
+    def vectorize(self, text, vector_length=-1):
         """
         Create a collapsed one hot vector for the text
         :param text: surname
         :return: one_hot ndarray the collapsed one-hot encoding
         """
-        matrix_vector = np.zeros((len(self.surname_vocab), self._max_surname_length), dtype=np.float32)
-        for char_index, char in enumerate(text):
-            matrix_vector[self.surname_vocab.lookup_token(char)][char_index] = 1
-        return matrix_vector
+        indices = [self.surname_vocab.begin_seq_index]
+        indices.extend([self.surname_vocab.lookup_token(char) for char in text])
+        indices.append(self.surname_vocab.end_seq_index)
+
+        if vector_length < 0:
+            vector_length = len(indices)
+
+        out_vector = np.zeros(vector_length, dtype=np.int64)
+        out_vector[:len(indices)] = indices
+        out_vector[len(indices):] = self.surname_vocab.mask_index
+
+        return out_vector, len(indices)
 
     @classmethod
     def from_dataframe(cls, dataframe):
@@ -129,8 +156,8 @@ class SurnameVectorizer(object):
         :param dataframe: the surname dataset
         :return: an instance of the SurnameVectorizer
         """
-        surname_vocab = Vocabulary(add_unk=True)
-        nationality_vocab = Vocabulary(add_unk=False)
+        surname_vocab = SequenceVocabulary()
+        nationality_vocab = Vocabulary()
         max_surname_length = 0
         for _, row in dataframe.iterrows():
             max_surname_length = max(len(row.surname), max_surname_length)
@@ -138,7 +165,7 @@ class SurnameVectorizer(object):
                 surname_vocab.add_token(char)
             nationality_vocab.add_token(row.nationality)
 
-        return cls(surname_vocab, nationality_vocab, max_surname_length)
+        return cls(surname_vocab, nationality_vocab)
 
     @classmethod
     def from_serializable(cls, contents):
@@ -147,10 +174,9 @@ class SurnameVectorizer(object):
         :param contents: the serializable dictionary
         :return: an instance of the SurnameVectorizer class
         """
-        surname_vocab = Vocabulary.from_serializable(contents['surname_vocab'])
+        surname_vocab = SequenceVocabulary.from_serializable(contents['surname_vocab'])
         nationality_vocab = Vocabulary.from_serializable(contents['nationality_vocab'])
-        max_surname_length = contents['max_surname_length']
-        return cls(surname_vocab, nationality_vocab, max_surname_length)
+        return cls(surname_vocab, nationality_vocab)
 
     def to_serializable(self):
         """
@@ -161,7 +187,6 @@ class SurnameVectorizer(object):
         return {
             'surname_vocab': self.surname_vocab.to_serializable(),
             'nationality_vocab': self.nationality_vocab.to_serializable(),
-            'max_surname_length': self._max_surname_length
         }
 
 
@@ -173,6 +198,8 @@ class SurnameDataset(Dataset):
         """
         self.surname_df = surname_df
         self._vectorizer = vectorizer
+
+        self._max_seq_length = max(map(len, self.surname_df.surname)) + 2
 
         self.train_df = self.surname_df[self.surname_df.split == 'train']
         self.train_size = len(self.train_df)
@@ -202,6 +229,42 @@ class SurnameDataset(Dataset):
         self.class_weights = 1.0 / torch.tensor(frequencies, dtype=torch.float32)
 
     @classmethod
+    def load_dataset_and_load_vectorizer(cls, surname_csv, vectorizer_filepath):
+        """Load dataset and the corresponding vectorizer.
+        Used in the case in the vectorizer has been cached for re-use
+
+        Args:
+            surname_csv (str): location of the dataset
+            vectorizer_filepath (str): location of the saved vectorizer
+        Returns:
+            an instance of SurnameDataset
+        """
+        surname_df = pd.read_csv(surname_csv)
+        vectorizer = cls.load_vectorizer_only(vectorizer_filepath)
+        return cls(surname_df, vectorizer)
+
+    @staticmethod
+    def load_vectorizer_only(vectorizer_filepath):
+        """a static method for loading the vectorizer from file
+
+        Args:
+            vectorizer_filepath (str): the location of the serialized vectorizer
+        Returns:
+            an instance of SurnameVectorizer
+        """
+        with open(vectorizer_filepath) as fp:
+            return SurnameVectorizer.from_serializable(json.load(fp))
+
+    def save_vectorizer(self, vectorizer_filepath):
+        """saves the vectorizer to disk using json
+
+        Args:
+            vectorizer_filepath (str): the location to save the vectorizer
+        """
+        with open(vectorizer_filepath, "w") as fp:
+            json.dump(self._vectorizer.to_serializable(), fp)
+
+    @classmethod
     def load_dataset_and_make_vectorizer(cls, surname_csv):
         """
         :param surname_csv: csv file path
@@ -227,11 +290,12 @@ class SurnameDataset(Dataset):
         :return: a dict of the data point's features (x_data) and label (y_target)
         """
         row = self._target_df.iloc[index]
-        surname_matrix = self._vectorizer.vectorize(row.surname)
+        surname_vector, vec_length = self._vectorizer.vectorize(row.surname, self._max_seq_length)
         nationality_index = self._vectorizer.nationality_vocab.lookup_token(row.nationality)
         return {
-            'x_data': surname_matrix,
-            'y_target': nationality_index
+            'x_data': surname_vector,
+            'y_target': nationality_index,
+            'x_length': vec_length
         }
 
     def get_num_batches(self, batch_size):

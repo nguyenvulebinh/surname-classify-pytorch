@@ -4,7 +4,7 @@
 
 ####This repo is baseline for that problem. I also provide pipeline to preprocess data before input to the model.
 
-* surname_classifier.py define model (Multi perceptron layer in branch mlp, CNN layer in branch master)
+* surname_classifier.py define model (Multi perceptron layer in branch mlp, CNN layer in branch cnn, RNN layer in branch master)
 * surname_dataset.py define classes for prepare data (convert from csv to vector, vocab, create batch, ...)
 * train.py steps to train, save model.
 * infer.py infer new instance
